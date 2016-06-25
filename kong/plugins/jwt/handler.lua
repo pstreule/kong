@@ -57,7 +57,7 @@ function JwtHandler:access(conf)
   end
 
   if not token then
-    return responses.send_HTTP_UNAUTHORIZED()
+    return responses.send_HTTP_UNAUTHORIZED("No token found")
   end
 
   -- Decode token to find out who the consumer is
@@ -67,10 +67,21 @@ function JwtHandler:access(conf)
   end
 
   local claims = jwt.claims
+  local jwt_secret_key = ""
 
-  local jwt_secret_key = claims[conf.key_claim_name]
-  if not jwt_secret_key then
-    return responses.send_HTTP_UNAUTHORIZED("No mandatory '"..conf.key_claim_name.."' in claims")
+  if conf.key_location == "claims" then
+    jwt_secret_key = claims[conf.key_claim_name]
+    if not jwt_secret_key then
+      return responses.send_HTTP_UNAUTHORIZED("No mandatory '"..conf.key_claim_name.."' in claims")
+    end
+  elseif conf.key_location == "header" then
+    jwt_secret_key = jwt.header[conf.key_header_name]
+    if not jwt_secret_key then
+      return responses.send_HTTP_UNAUTHORIZED("No mandatory '"..conf.key_header_name.."' in headers")
+    end
+  else
+    -- Should not happen
+    return responses.send_HTTP_UNAUTHORIZED("Unsupported key location '"..conf.key_location.."'")
   end
 
   -- Retrieve the secret
@@ -84,7 +95,7 @@ function JwtHandler:access(conf)
   end)
 
   if not jwt_secret then
-    return responses.send_HTTP_FORBIDDEN("No credentials found for given '"..conf.key_claim_name.."'")
+    return responses.send_HTTP_FORBIDDEN("No credentials found for given key '"..jwt_secret_key.."'")
   end
 
   local algorithm = jwt_secret.algorithm or "HS256"
@@ -121,7 +132,8 @@ function JwtHandler:access(conf)
 
   -- However this should not happen
   if not consumer then
-    return responses.send_HTTP_FORBIDDEN(string_format("Could not find consumer for '%s=%s'", conf.key_claim_name, jwt_secret_key))
+    local key_name = conf.key_location == "claims" and conf.key_claim_name or conf.key_header_name
+    return responses.send_HTTP_FORBIDDEN(string_format("Could not find consumer for '%s=%s'", key_name, jwt_secret_key))
   end
 
   ngx.req.set_header(constants.HEADERS.CONSUMER_ID, consumer.id)
